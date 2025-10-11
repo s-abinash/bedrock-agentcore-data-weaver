@@ -1,93 +1,283 @@
-# agent-core
+# Pandas Agent Core
 
+A standalone pandas data analysis agent powered by LangChain and LangGraph. This agent can analyze pandas DataFrames using natural language queries and provide insights, visualizations, and analysis.
 
+## Features
 
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://gitlab.presidio.com/hackathons/aws-global-ai/agent-core.git
-git branch -M main
-git push -uf origin main
-```
-
-## Integrate with your tools
-
-- [ ] [Set up project integrations](https://gitlab.presidio.com/hackathons/aws-global-ai/agent-core/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+- Natural language data analysis with pandas
+- Support for multiple DataFrames
+- Automatic chart generation and visualization
+- Extensible tool system
+- Built on LangChain and LangGraph
 
 ## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+
+This project uses [uv](https://github.com/astral-sh/uv) for fast, reliable package management.
+
+### Install uv (if not already installed)
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Install dependencies
+
+```bash
+uv sync
+```
+
+This will create a virtual environment and install all required dependencies.
+
+## Configuration
+
+Create a `.env` file in the project root with your AWS credentials:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your settings:
+
+```env
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+S3_BUCKET_NAME=data-agent-bedrock-ac
+```
+
+The application automatically loads these environment variables on startup.
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### Basic Example
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```python
+import pandas as pd
+from langchain_openai import ChatOpenAI
+from data_analyzer import analyze_data
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+df = pd.DataFrame({
+    'Product': ['Laptop', 'Mouse', 'Keyboard'],
+    'Price': [999.99, 24.99, 79.99],
+    'Sales': [150, 320, 210]
+})
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+dataframes = {'sales_data': df}
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+prompt = "What is the total revenue for each product?"
+
+result = analyze_data(dataframes, llm, prompt)
+print(result['output'])
+```
+
+### Run the example
+
+```bash
+uv run python example.py
+```
+
+### Using with Anthropic Claude
+
+```python
+from langchain_anthropic import ChatAnthropic
+
+llm = ChatAnthropic(
+    model="claude-3-5-sonnet-20241022",
+    temperature=0
+)
+
+result = analyze_data(dataframes, llm, prompt)
+```
+
+## AWS Bedrock AgentCore Deployment
+
+This agent is designed to deploy as an **Amazon Bedrock AgentCore** container.
+
+### Build and Deploy
+
+1. Build the Docker image for ARM64:
+
+```bash
+docker build --platform linux/arm64 -t pandas-agent-core .
+```
+
+2. Tag and push to Amazon ECR:
+
+```bash
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
+docker tag pandas-agent-core:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/pandas-agent-core:latest
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/pandas-agent-core:latest
+```
+
+3. Deploy to Bedrock AgentCore using the AWS Console or CLI
+
+### API Endpoints
+
+The container exposes the following endpoints required by Bedrock AgentCore:
+
+- `POST /invocations` - Main agent invocation endpoint
+- `GET /ping` - Health check endpoint
+
+### Request Format
+
+Send a POST request to `/invocations` with S3 URLs:
+
+```json
+{
+  "s3_urls": {
+    "sales_data": "s3://my-bucket/data/sales.csv",
+    "inventory": "s3://my-bucket/data/inventory.xlsx"
+  },
+  "prompt": "What is the total revenue by category?"
+}
+```
+
+Region is configured via environment variables (`.env` file).
+
+**Supported File Formats:**
+- CSV (`.csv`)
+- Excel (`.xlsx`, `.xls`) - Multiple sheets supported, creates separate DataFrames
+- Parquet (`.parquet`)
+- JSON (`.json`)
+
+### Response Format
+
+```json
+{
+  "output": "Analysis results...",
+  "intermediate_steps": [],
+  "dataframes_loaded": ["sales_data", "inventory_Sheet1", "inventory_Sheet2"]
+}
+```
+
+### Local Testing
+
+Test the container locally:
+
+```bash
+docker run -p 8080:8080 \
+  -e AWS_REGION=us-east-1 \
+  -e AWS_ACCESS_KEY_ID=your-key \
+  -e AWS_SECRET_ACCESS_KEY=your-secret \
+  -e S3_BUCKET_NAME=data-agent-bedrock-ac \
+  pandas-agent-core
+```
+
+Test the endpoint:
+
+```bash
+curl -X POST http://localhost:8080/invocations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "s3_urls": {
+      "sales": "s3://my-bucket/sales.csv"
+    },
+    "prompt": "Show summary statistics"
+  }'
+```
+
+## S3 Data Loading
+
+The agent automatically loads data from S3 URLs and converts them to pandas DataFrames:
+
+### Single File
+```json
+{
+  "s3_urls": {
+    "my_data": "s3://bucket/file.csv"
+  }
+}
+```
+Creates: `{"my_data": DataFrame}`
+
+### Excel with Multiple Sheets
+```json
+{
+  "s3_urls": {
+    "financials": "s3://bucket/report.xlsx"
+  }
+}
+```
+If the Excel file has sheets "Q1", "Q2", "Q3", creates:
+`{"financials_Q1": DataFrame, "financials_Q2": DataFrame, "financials_Q3": DataFrame}`
+
+### Multiple Files
+```json
+{
+  "s3_urls": {
+    "sales": "s3://bucket/sales.parquet",
+    "inventory": "s3://bucket/inventory.json"
+  }
+}
+```
+Creates: `{"sales": DataFrame, "inventory": DataFrame}`
+
+## Project Structure
+
+```
+agent-core/
+├── agents/
+│   ├── __init__.py
+│   └── pandas_agent.py
+├── tools/
+│   ├── __init__.py
+│   └── upload_image.py
+├── s3_loader.py
+├── data_analyzer.py
+├── app.py
+├── example.py
+├── test_api.py
+├── deploy.sh
+├── Dockerfile
+├── .dockerignore
+├── .env.example
+├── pyproject.toml
+└── README.md
+```
+
+## API Reference
+
+### analyze_data(dataframes, llm, prompt)
+
+Main function to analyze pandas DataFrames using natural language.
+
+**Parameters:**
+- `dataframes` (dict): Dictionary of DataFrames with names as keys
+- `llm` (LanguageModelLike): LangChain LLM instance
+- `prompt` (str): Natural language query or analysis request
+
+**Returns:**
+- dict: Contains 'output' with analysis results and 'intermediate_steps'
+
+## Dependencies
+
+Core dependencies include:
+- langchain
+- langchain-experimental
+- langchain-core
+- langgraph
+- pandas
+- numpy
+- matplotlib
+- seaborn
+- scikit-learn
+
+## Development
+
+To add new dependencies:
+
+```bash
+uv add package-name
+```
+
+To update dependencies:
+
+```bash
+uv sync --upgrade
+```
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+This project is standalone code for hackathon use.
