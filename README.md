@@ -54,7 +54,7 @@ The application automatically loads these environment variables on startup.
 ```python
 import pandas as pd
 from langchain_openai import ChatOpenAI
-from data_analyzer import analyze_data
+from server.data_analyzer import analyze_data
 
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
@@ -76,6 +76,12 @@ print(result['output'])
 
 ```bash
 uv run python example.py
+```
+
+### Run the API server
+
+```bash
+uv run python -m server.app
 ```
 
 ### Using with Anthropic Claude
@@ -218,15 +224,17 @@ Creates: `{"sales": DataFrame, "inventory": DataFrame}`
 
 ```
 agent-core/
-├── agents/
+├── server/
 │   ├── __init__.py
-│   └── pandas_agent.py
-├── tools/
-│   ├── __init__.py
-│   └── upload_image.py
-├── s3_loader.py
-├── data_analyzer.py
-├── app.py
+│   ├── app.py
+│   ├── data_analyzer.py
+│   ├── s3_loader.py
+│   ├── agents/
+│   │   └── pandas_agent.py
+│   └── tools/
+│       └── upload_image.py
+├── ui/
+│   └── ...
 ├── example.py
 ├── test_api.py
 ├── deploy.sh

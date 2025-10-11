@@ -10,14 +10,10 @@ RUN apt-get update && apt-get install -y \
 COPY pyproject.toml .
 RUN pip install uv && uv pip install --system --no-cache -r pyproject.toml
 
-COPY agents/ ./agents/
-COPY tools/ ./tools/
-COPY s3_loader.py .
-COPY data_analyzer.py .
-COPY app.py .
+COPY server/ ./server/
 
-RUN mkdir -p /app/static
+RUN mkdir -p /app/server/static
 
 EXPOSE 8080
 
-CMD ["python", "app.py"]
+CMD ["python", "-m", "server.app"]

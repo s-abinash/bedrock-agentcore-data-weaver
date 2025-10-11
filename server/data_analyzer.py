@@ -2,8 +2,8 @@ from datetime import datetime
 
 from langchain.agents import AgentType
 
-from agents.pandas_agent import create_pandas_dataframe_agent
-from tools.upload_image import move_image_to_static_server
+from .agents.pandas_agent import create_pandas_dataframe_agent
+from .tools.upload_image import move_image_to_static_server
 
 AST_PERSISTENCE_INSTRUCTION = """
 CRITICAL EXECUTION CONSTRAINT: This is a stateless Python environment where NOTHING persists between code executions. Every single code block is completely isolated.
