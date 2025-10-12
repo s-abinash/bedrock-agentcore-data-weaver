@@ -1,37 +1,28 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
-if [ -z "$1" ]; then
-    echo "Usage: ./deploy.sh <aws-account-id> [region]"
-    echo "Example: ./deploy.sh 123456789012 us-east-1"
-    exit 1
-fi
+REPO_URI="683883881884.dkr.ecr.us-west-2.amazonaws.com/data-agent-bedrock-ac"
+IMAGE_NAME="${IMAGE_NAME:-pandas-agent-core}"
+IMAGE_TAG="${1:-latest}"
+PLATFORM="${PLATFORM:-linux/arm64}"
+REGION="us-west-2"
+REPOSITORY_NAME="data-agent-bedrock-ac"
 
-ACCOUNT_ID=$1
-REGION=${2:-us-east-1}
-IMAGE_NAME="pandas-agent-core"
-ECR_REPO="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${IMAGE_NAME}"
+echo "Building Docker image (${IMAGE_NAME}:${IMAGE_TAG}) for platform ${PLATFORM}..."
+docker build --platform "${PLATFORM}" -t "${IMAGE_NAME}:${IMAGE_TAG}" .
 
-echo "Building Docker image for ARM64..."
-docker build --platform linux/arm64 -t ${IMAGE_NAME}:latest .
+echo "Authenticating Docker with ECR (${REGION})..."
+aws ecr get-login-password --region "${REGION}" | docker login --username AWS --password-stdin "683883881884.dkr.ecr.${REGION}.amazonaws.com"
 
-echo "Logging into Amazon ECR..."
-aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com
+echo "Ensuring ECR repository '${REPOSITORY_NAME}' exists..."
+aws ecr describe-repositories --repository-names "${REPOSITORY_NAME}" --region "${REGION}" >/dev/null 2>&1 || \
+    aws ecr create-repository --repository-name "${REPOSITORY_NAME}" --region "${REGION}"
 
-echo "Creating ECR repository if it doesn't exist..."
-aws ecr describe-repositories --repository-names ${IMAGE_NAME} --region ${REGION} || \
-    aws ecr create-repository --repository-name ${IMAGE_NAME} --region ${REGION}
+echo "Tagging image for push..."
+docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${REPO_URI}:${IMAGE_TAG}"
 
-echo "Tagging image..."
-docker tag ${IMAGE_NAME}:latest ${ECR_REPO}:latest
+echo "Pushing image to ${REPO_URI}:${IMAGE_TAG}..."
+docker push "${REPO_URI}:${IMAGE_TAG}"
 
-echo "Pushing image to ECR..."
-docker push ${ECR_REPO}:latest
-
-echo "Successfully deployed ${ECR_REPO}:latest"
-echo ""
-echo "Next steps:"
-echo "1. Go to AWS Bedrock console"
-echo "2. Create a new AgentCore"
-echo "3. Use the image URI: ${ECR_REPO}:latest"
+echo "Successfully pushed image to ${REPO_URI}:${IMAGE_TAG}"

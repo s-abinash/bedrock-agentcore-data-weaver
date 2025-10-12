@@ -81,8 +81,10 @@ uv run python example.py
 ### Run the API server
 
 ```bash
-uv run python -m server.app
+uv run opentelemetry-instrument python -m server.app
 ```
+
+Set `OTEL_SERVICE_NAME` (for example, `pandas-agent-core`) in your environment or `.env` file to have traces show up with a meaningful service name.
 
 ### Using with Anthropic Claude
 
@@ -168,6 +170,7 @@ docker run -p 8080:8080 \
   -e AWS_ACCESS_KEY_ID=your-key \
   -e AWS_SECRET_ACCESS_KEY=your-secret \
   -e S3_BUCKET_NAME=data-agent-bedrock-ac \
+  -e OTEL_SERVICE_NAME=pandas-agent-core \
   pandas-agent-core
 ```
 
@@ -176,13 +179,29 @@ Test the endpoint:
 ```bash
 curl -X POST http://localhost:8080/invocations \
   -H "Content-Type: application/json" \
+  -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: demo-session" \
   -d '{
     "s3_urls": {
       "sales": "s3://my-bucket/sales.csv"
     },
-    "prompt": "Show summary statistics"
+    "prompt": "Show summary statistics",
+    "traceId": "demo-trace-123"
   }'
 ```
+
+## Observability
+
+This project ships with [AWS Distro for OpenTelemetry (ADOT)](https://aws-otel.github.io/docs/getting-started/python-sdk) auto-instrumentation.
+
+- The Docker image launches with `opentelemetry-instrument python -m server.app`, so default integrations (FastAPI, boto3, HTTP clients, etc.) emit spans automatically.
+- Ensure `aws-opentelemetry-distro` dependencies are installed by running `uv sync` after pulling the repo.
+- Provide `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, and any other OpenTelemetry settings through environment variables or your `.env`.
+- When invoking the AgentCore runtime, include the header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` so ADOT can propagate the session identifier.
+- When using the `/invocations` REST endpoint:
+  - Set `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` and/or `mcp-session-id` headers to preserve session context.
+  - Include `traceparent`, `tracestate`, `baggage`, or `X-Amzn-Trace-Id` headers for distributed tracing as needed.
+  - Optionally pass corresponding fields in the JSON payload (`traceId`, `traceparent`, `tracestate`, `baggage`) to record the information alongside the request.
+- For additional control (custom headers, exporters, sampling), consult the [Enhanced AgentCore observability documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/agent-monitoring.html).
 
 ## S3 Data Loading
 

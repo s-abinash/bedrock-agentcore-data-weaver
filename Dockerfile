@@ -1,4 +1,4 @@
-FROM --platform=linux/arm64 python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
@@ -16,4 +16,4 @@ RUN mkdir -p /app/server/static
 
 EXPOSE 8080
 
-CMD ["python", "-m", "server.app"]
+CMD ["opentelemetry-instrument", "python", "-m", "server.app"]

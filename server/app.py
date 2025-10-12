@@ -18,6 +18,10 @@ from .s3_loader import load_multiple_from_s3
 
 load_dotenv()
 
+DEFAULT_OTEL_SERVICE_NAME = "pandas-agent-core"
+if not os.environ.get("OTEL_SERVICE_NAME"):
+    os.environ["OTEL_SERVICE_NAME"] = DEFAULT_OTEL_SERVICE_NAME
+
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -37,6 +41,10 @@ app.add_middleware(
 class InvocationRequest(BaseModel):
     s3_urls: Dict[str, str]
     prompt: str
+    traceId: str | None = None
+    baggage: str | None = None
+    tracestate: str | None = None
+    traceparent: str | None = None
 
 def get_llm():
     return ChatOpenAI(
@@ -72,6 +80,38 @@ def _get_s3_client():
 
     logger.debug("Creating boto3 S3 client", extra={"region": region, "has_explicit_creds": bool(access_key and secret_key)})
     return boto3.client("s3", **client_kwargs)
+
+
+TRACE_HEADER_KEYS = {
+    "x-amzn-trace-id",
+    "traceparent",
+    "tracestate",
+    "baggage",
+    "x-amzn-bedrock-agentcore-runtime-session-id",
+    "mcp-session-id",
+}
+
+
+def _extract_trace_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    extracted = {}
+    for key, value in headers.items():
+        key_lower = key.lower()
+        if key_lower in TRACE_HEADER_KEYS:
+            extracted[key] = value
+    return extracted
+
+
+def _extract_trace_payload_overrides(payload: InvocationRequest) -> Dict[str, str]:
+    trace_payload = {}
+    if payload.traceId:
+        trace_payload["traceId"] = payload.traceId
+    if payload.baggage:
+        trace_payload["baggage"] = payload.baggage
+    if payload.tracestate:
+        trace_payload["tracestate"] = payload.tracestate
+    if payload.traceparent:
+        trace_payload["traceparent"] = payload.traceparent
+    return trace_payload
 
 @app.get('/ping')
 def ping():
@@ -165,10 +205,10 @@ async def upload_files(
 
 
 @app.post('/invocations')
-def invocations(request: InvocationRequest):
+def invocations(request: Request, payload: InvocationRequest):
     try:
-        s3_urls = request.s3_urls
-        prompt = request.prompt
+        s3_urls = payload.s3_urls
+        prompt = payload.prompt
 
         if not s3_urls:
             raise HTTPException(
@@ -187,6 +227,8 @@ def invocations(request: InvocationRequest):
             extra={
                 "prompt_preview": prompt[:120],
                 "dataframe_count": len(s3_urls),
+                "trace_headers": _extract_trace_headers(request.headers),
+                "trace_payload": _extract_trace_payload_overrides(payload),
             },
         )
 
@@ -213,7 +255,11 @@ def invocations(request: InvocationRequest):
         return {
             "output": result.get('output', ''),
             "intermediate_steps": result.get('intermediate_steps', []),
-            "dataframes_loaded": list(df_dict.keys())
+            "dataframes_loaded": list(df_dict.keys()),
+            "trace": {
+                "headers": _extract_trace_headers(request.headers),
+                "payload": _extract_trace_payload_overrides(payload),
+            }
         }
 
     except HTTPException:

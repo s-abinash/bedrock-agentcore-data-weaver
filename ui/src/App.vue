@@ -116,6 +116,63 @@
       <p class="caption">The backend will use Amazon Bedrock AgentCore runtime for analysis.</p>
     </section>
 
+    <section class="card">
+      <h2>Observability</h2>
+      <p class="hint">
+        Optional tracing context. Leave blank for defaults.
+      </p>
+      <div class="grid">
+        <label class="field">
+          <span>Session ID</span>
+          <input
+            type="text"
+            placeholder="X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+            v-model="traceFields.sessionId"
+          />
+        </label>
+        <label class="field">
+          <span>MCP Session ID</span>
+          <input
+            type="text"
+            placeholder="mcp-session-id"
+            v-model="traceFields.mcpSessionId"
+          />
+        </label>
+        <label class="field">
+          <span>Traceparent</span>
+          <input
+            type="text"
+            placeholder="00-4bf92f...-00f067aa0ba902b7-01"
+            v-model="traceFields.traceparent"
+          />
+        </label>
+        <label class="field">
+          <span>Tracestate</span>
+          <input
+            type="text"
+            placeholder="congo=t61rcWkgMzE,rojo=00f067aa0ba902b7"
+            v-model="traceFields.tracestate"
+          />
+        </label>
+        <label class="field">
+          <span>Baggage</span>
+          <input
+            type="text"
+            placeholder="userId=alice,serverRegion=us-east-1"
+            v-model="traceFields.baggage"
+          />
+        </label>
+        <label class="field">
+          <span>X-Ray Trace ID</span>
+          <input
+            type="text"
+            placeholder="Root=1-5759e988-..."
+            v-model="traceFields.traceId"
+          />
+        </label>
+      </div>
+    </section>
+
     <section v-if="analysisResult" class="card">
       <h2>Results</h2>
       <div class="analysis-output">
@@ -263,6 +320,49 @@ const isReadyToAnalyze = computed(() => {
   return uploadedFiles.value.length > 0 && prompt.value.trim().length > 0;
 });
 
+const traceFields = ref({
+  traceId: "",
+  traceparent: "",
+  tracestate: "",
+  baggage: "",
+  sessionId: "",
+  mcpSessionId: "",
+});
+
+const resetTraceFields = () => {
+  traceFields.value = {
+    traceId: "",
+    traceparent: "",
+    tracestate: "",
+    baggage: "",
+    sessionId: "",
+    mcpSessionId: "",
+  };
+};
+
+const observabilityHeaders = computed(() => {
+  const headers = {};
+  if (traceFields.value.sessionId) {
+    headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = traceFields.value.sessionId;
+  }
+  if (traceFields.value.mcpSessionId) {
+    headers["mcp-session-id"] = traceFields.value.mcpSessionId;
+  }
+  if (traceFields.value.traceparent) {
+    headers["traceparent"] = traceFields.value.traceparent;
+  }
+  if (traceFields.value.tracestate) {
+    headers["tracestate"] = traceFields.value.tracestate;
+  }
+  if (traceFields.value.baggage) {
+    headers["baggage"] = traceFields.value.baggage;
+  }
+  if (traceFields.value.traceId) {
+    headers["X-Amzn-Trace-Id"] = traceFields.value.traceId;
+  }
+  return headers;
+});
+
 const runAnalysis = async () => {
   if (!isReadyToAnalyze.value) {
     return;
@@ -277,10 +377,20 @@ const runAnalysis = async () => {
   }, {});
 
   try {
-    const response = await apiClient.post("/invocations", {
-      s3_urls: s3UrlsPayload,
-      prompt: prompt.value
-    });
+    const response = await apiClient.post(
+      "/invocations",
+      {
+        s3_urls: s3UrlsPayload,
+        prompt: prompt.value,
+        traceId: traceFields.value.traceId || undefined,
+        traceparent: traceFields.value.traceparent || undefined,
+        tracestate: traceFields.value.tracestate || undefined,
+        baggage: traceFields.value.baggage || undefined,
+      },
+      {
+        headers: observabilityHeaders.value,
+      }
+    );
     analysisResult.value = response.data;
   } catch (error) {
     analysisResult.value = null;
@@ -296,6 +406,7 @@ const reset = () => {
   analysisResult.value = null;
   prompt.value = "";
   errorMessage.value = "";
+  resetTraceFields();
 };
 
 const structuredSteps = computed(() => {
@@ -563,6 +674,37 @@ h3 {
   outline: none;
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+  color: #1e293b;
+}
+
+.field input {
+  border-radius: 10px;
+  border: 1px solid #d0d7f0;
+  padding: 0.65rem 0.8rem;
+  font-size: 0.95rem;
+  background-color: #f8fbff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.field input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  background-color: #fff;
 }
 
 .actions {
