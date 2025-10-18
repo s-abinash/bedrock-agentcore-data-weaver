@@ -1,310 +1,142 @@
-# Pandas Agent Core
+# DataWeaver
 
-A standalone pandas data analysis agent powered by LangChain and LangGraph. This agent can analyze pandas DataFrames using natural language queries and provide insights, visualizations, and analysis.
+DataWeaver is a FastAPI service and Vue UI that sit between Amazon Bedrock AgentCore and business users. Upload tabular data to S3, ask a question, and the service coordinates Bedrock’s code-interpreter tools to deliver Markdown narratives and shareable charts.
 
-## Features
+![Architecture](architecture.jpg)
 
-- Natural language data analysis with pandas
-- Support for multiple DataFrames
-- Automatic chart generation and visualization
-- Extensible tool system
-- Built on LangChain and LangGraph
+## Key Features
 
-## Installation
+- **Single data ingress** – `/upload` streams files to S3 and returns keyed URIs for analysis sessions.
+- **Dual hosting model** – same container runs inside Bedrock Agent Runtime or in ECS as an API proxy.
+- **Agent runtime orchestration** – LangChain `AgentExecutor` drives the Bedrock code interpreter to load data, run matplotlib, and save charts per session.
+- **Polished responses** – results return as sanitized Markdown and chart URLs; the Vue front end renders headings, tables, and gallery cards.
+- **Trace-friendly** – headers (`traceparent`, `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, etc.) and payload overrides are preserved for OTEL.
 
-This project uses [uv](https://github.com/astral-sh/uv) for fast, reliable package management.
+## Repository Layout
 
-### Install uv (if not already installed)
+- `server/` – FastAPI backend, Bedrock orchestration utilities, S3 loader, Streamlit helper.
+- `ui/` – Vue 3 + Vite single page app (axios client, Markdown renderer, chart grid).
+- `Dockerfile` – production image suitable for ECS or Bedrock Agent Runtime.
+- `architecture.jpg` – system diagram included above.
+
+## Prerequisites
+
+- Python 3.11+
+- Node.js 18+ (for the UI)
+- AWS account with Bedrock AgentCore access and S3 permissions
+- `uv` for Python dependency management (optional but recommended)
+
+## Backend Setup
 
 ```bash
+# Install uv if needed
 curl -LsSf https://astral.sh/uv/install.sh | sh
-```
 
-### Install dependencies
-
-```bash
+# Install Python dependencies
 uv sync
 ```
 
-This will create a virtual environment and install all required dependencies.
-
-## Configuration
-
-Create a `.env` file in the project root with your AWS credentials:
+Create `.env` in the repository root:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your settings:
+Set the essentials (no static credentials required when using task roles):
 
 ```env
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-S3_BUCKET_NAME=data-agent-bedrock-ac
+AWS_REGION=us-west-2
+S3_BUCKET_NAME=your-artifact-bucket
+BEDROCK_AGENT_RUNTIME_ARN=arn:aws:bedrock-agentcore:...
+CODE_INTERPRETER_TOOL_ID=ci-xxxxxxxx
 ```
 
-The application automatically loads these environment variables on startup.
-
-## Usage
-
-### Basic Example
-
-```python
-import pandas as pd
-from langchain_openai import ChatOpenAI
-from server.data_analyzer import analyze_data
-
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-
-df = pd.DataFrame({
-    'Product': ['Laptop', 'Mouse', 'Keyboard'],
-    'Price': [999.99, 24.99, 79.99],
-    'Sales': [150, 320, 210]
-})
-
-dataframes = {'sales_data': df}
-
-prompt = "What is the total revenue for each product?"
-
-result = analyze_data(dataframes, llm, prompt)
-print(result['output'])
-```
-
-### Run the example
+Run the API locally:
 
 ```bash
-uv run python example.py
+uv run uvicorn server.app:app --host 0.0.0.0 --port 8080
 ```
 
-### Run the API server
+## Frontend Setup
 
 ```bash
-uv run opentelemetry-instrument python -m server.app
+cd ui
+npm install
+npm run dev
 ```
 
-Set `OTEL_SERVICE_NAME` (for example, `pandas-agent-core`) in your environment or `.env` file to have traces show up with a meaningful service name.
+Configure the API base URL via `.env` or runtime global:
 
-### Using with Anthropic Claude
+- build time: `VITE_API_BASE_URL=https://your-api.example.com`
+- runtime: inject `window.__AGENT_CORE_API_BASE_URL`
 
-```python
-from langchain_anthropic import ChatAnthropic
+For Markdown playground styling, set `VITE_MARKDOWN_PREVIEW=true` before starting `npm run dev`.
 
-llm = ChatAnthropic(
-    model="claude-3-5-sonnet-20241022",
-    temperature=0
-)
+## API Surface
 
-result = analyze_data(dataframes, llm, prompt)
-```
+| Method | Path           | Description                                     |
+|--------|----------------|-------------------------------------------------|
+| GET    | `/ping`        | Health check                                    |
+| POST   | `/upload`      | Multipart file upload → S3 URLs map             |
+| POST   | `/invocations` | Bedrock-compatible data analysis endpoint       |
+| POST   | `/chat`        | Proxy to Bedrock Agent Runtime (UI entry point) |
 
-## AWS Bedrock AgentCore Deployment
-
-This agent is designed to deploy as an **Amazon Bedrock AgentCore** container.
-
-### Build and Deploy
-
-1. Build the Docker image for ARM64:
+Example `/chat` request:
 
 ```bash
-docker build --platform linux/arm64 -t pandas-agent-core .
-```
-
-2. Tag and push to Amazon ECR:
-
-```bash
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
-docker tag pandas-agent-core:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/pandas-agent-core:latest
-docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/pandas-agent-core:latest
-```
-
-3. Deploy to Bedrock AgentCore using the AWS Console or CLI
-
-### API Endpoints
-
-The container exposes the following endpoints required by Bedrock AgentCore:
-
-- `POST /invocations` - Main agent invocation endpoint
-- `GET /ping` - Health check endpoint
-
-### Request Format
-
-Send a POST request to `/invocations` with S3 URLs:
-
-```json
-{
-  "s3_urls": {
-    "sales_data": "s3://my-bucket/data/sales.csv",
-    "inventory": "s3://my-bucket/data/inventory.xlsx"
-  },
-  "prompt": "What is the total revenue by category?"
-}
-```
-
-Region is configured via environment variables (`.env` file).
-
-**Supported File Formats:**
-- CSV (`.csv`)
-- Excel (`.xlsx`, `.xls`) - Multiple sheets supported, creates separate DataFrames
-- Parquet (`.parquet`)
-- JSON (`.json`)
-
-### Response Format
-
-```json
-{
-  "output": "Analysis results...",
-  "intermediate_steps": [],
-  "dataframes_loaded": ["sales_data", "inventory_Sheet1", "inventory_Sheet2"]
-}
-```
-
-### Local Testing
-
-Test the container locally:
-
-```bash
-docker run -p 8080:8080 \
-  -e AWS_REGION=us-east-1 \
-  -e AWS_ACCESS_KEY_ID=your-key \
-  -e AWS_SECRET_ACCESS_KEY=your-secret \
-  -e S3_BUCKET_NAME=data-agent-bedrock-ac \
-  -e OTEL_SERVICE_NAME=pandas-agent-core \
-  pandas-agent-core
-```
-
-Test the endpoint:
-
-```bash
-curl -X POST http://localhost:8080/invocations \
+curl -X POST "$API_BASE/chat" \
   -H "Content-Type: application/json" \
-  -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: demo-session" \
+  -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: session-1234" \
   -d '{
     "s3_urls": {
-      "sales": "s3://my-bucket/sales.csv"
+      "customers": "s3://your-bucket/uploads/customers.csv"
     },
-    "prompt": "Show summary statistics",
-    "traceId": "demo-trace-123"
+    "prompt": "Generate a bar chart of customer count by country and summarise the top regions."
   }'
 ```
 
-## Observability
+Successful responses include:
 
-This project ships with [AWS Distro for OpenTelemetry (ADOT)](https://aws-otel.github.io/docs/getting-started/python-sdk) auto-instrumentation.
+- `output` – Markdown narrative
+- `intermediate_steps` – LangChain trace snippets
+- `dataframes_loaded` – DataFrame keys hydrated from S3
+- `charts` – Presigned URLs under `s3://bucket/charts/<runtimeSessionId>/`
 
-- The Docker image launches with `opentelemetry-instrument python -m server.app`, so default integrations (FastAPI, boto3, HTTP clients, etc.) emit spans automatically.
-- Ensure `aws-opentelemetry-distro` dependencies are installed by running `uv sync` after pulling the repo.
-- Provide `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, and any other OpenTelemetry settings through environment variables or your `.env`.
-- When invoking the AgentCore runtime, include the header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` so ADOT can propagate the session identifier.
-- When using the `/invocations` REST endpoint:
-  - Set `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` and/or `mcp-session-id` headers to preserve session context.
-  - Include `traceparent`, `tracestate`, `baggage`, or `X-Amzn-Trace-Id` headers for distributed tracing as needed.
-  - Optionally pass corresponding fields in the JSON payload (`traceId`, `traceparent`, `tracestate`, `baggage`) to record the information alongside the request.
-- For additional control (custom headers, exporters, sampling), consult the [Enhanced AgentCore observability documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/agent-monitoring.html).
+## Observability Notes
 
-## S3 Data Loading
+- ADOT auto-instrumentation (`aws-opentelemetry-distro`) is installed; supply OTEL variables as needed.
+- Trace headers from clients are echoed back under `trace.headers` and `trace.payload`.
+- The agent prompt instructs Bedrock to avoid leaking session IDs; chart paths remain internal.
 
-The agent automatically loads data from S3 URLs and converts them to pandas DataFrames:
+## Deployment
 
-### Single File
-```json
-{
-  "s3_urls": {
-    "my_data": "s3://bucket/file.csv"
-  }
-}
-```
-Creates: `{"my_data": DataFrame}`
-
-### Excel with Multiple Sheets
-```json
-{
-  "s3_urls": {
-    "financials": "s3://bucket/report.xlsx"
-  }
-}
-```
-If the Excel file has sheets "Q1", "Q2", "Q3", creates:
-`{"financials_Q1": DataFrame, "financials_Q2": DataFrame, "financials_Q3": DataFrame}`
-
-### Multiple Files
-```json
-{
-  "s3_urls": {
-    "sales": "s3://bucket/sales.parquet",
-    "inventory": "s3://bucket/inventory.json"
-  }
-}
-```
-Creates: `{"sales": DataFrame, "inventory": DataFrame}`
-
-## Project Structure
-
-```
-agent-core/
-├── server/
-│   ├── __init__.py
-│   ├── app.py
-│   ├── data_analyzer.py
-│   ├── s3_loader.py
-│   ├── agents/
-│   │   └── pandas_agent.py
-│   └── tools/
-│       └── upload_image.py
-├── ui/
-│   └── ...
-├── example.py
-├── test_api.py
-├── deploy.sh
-├── Dockerfile
-├── .dockerignore
-├── .env.example
-├── pyproject.toml
-└── README.md
-```
-
-## API Reference
-
-### analyze_data(dataframes, llm, prompt)
-
-Main function to analyze pandas DataFrames using natural language.
-
-**Parameters:**
-- `dataframes` (dict): Dictionary of DataFrames with names as keys
-- `llm` (LanguageModelLike): LangChain LLM instance
-- `prompt` (str): Natural language query or analysis request
-
-**Returns:**
-- dict: Contains 'output' with analysis results and 'intermediate_steps'
-
-## Dependencies
-
-Core dependencies include:
-- langchain
-- langchain-experimental
-- langchain-core
-- langgraph
-- pandas
-- numpy
-- matplotlib
-- seaborn
-- scikit-learn
-
-## Development
-
-To add new dependencies:
+### Docker Build
 
 ```bash
-uv add package-name
+docker build -t agentcore-dataweaver .
 ```
 
-To update dependencies:
+### ECS (API proxy)
 
-```bash
-uv sync --upgrade
-```
+1. Push image to ECR.
+2. Configure task **execution role** for logging and **task role** with:
+   - `bedrock-agentcore:InvokeAgentRuntime`
+   - S3 read/write to the upload bucket
+3. Provide environment variables (`BEDROCK_AGENT_RUNTIME_ARN`, `CODE_INTERPRETER_TOOL_ID`, etc.).
+4. Expose port 8080 behind your load balancer.
+
+### Bedrock Agent Runtime
+
+1. Register the container image with Bedrock Agent Runtime.
+2. Supply the same environment variables.
+3. Bedrock invokes `/invocations` and `/ping`; `/chat` is unused in this mode.
+
+## Available Scripts
+
+- `uv run pytest` – backend smoke tests (see `server/tests`).
+- `npm run build` – production UI bundle.
+- `npm run lint` – add your lint command of choice.
 
 ## License
 
-This project is standalone code for hackathon use.
+Provided as-is for hackathon experimentation. Adjust, deploy, and extend to fit your environment.

@@ -4,11 +4,11 @@
       <div class="branding">
         <img
           class="logo"
-          src="https://a.b.cdn.console.awsstatic.com/a/v1/JH6LNPYTBZQF3PLGY3KXRE32RXTHCSMOCB2MLYGK23NUWCQXRFYQ/icon/289ffeb2a745ccf51ca89a297f47e382-e23370428c208f1105171354f38d8a21.svg"
+          src="https://img.icons8.com/nolan/64/web-analystics.png"
           alt="AWS"
         />
         <div>
-          <h1>AWS Data Agent</h1>
+          <h1>DataWeaver</h1>
           <p class="subtitle">Upload data, ask questions, get AI-driven insights.</p>
         </div>
       </div>
@@ -942,15 +942,17 @@ button:disabled {
 
 .analysis-markdown table {
   border-collapse: collapse;
-  width: 100%;
   font-size: 0.95rem;
+  align-self: flex-start;
+  max-width: 100%;
 }
 
 .analysis-markdown th,
 .analysis-markdown td {
   border: 1px solid #dbe4ff;
-  padding: 0.6rem;
+  padding: 0.55rem 0.9rem;
   text-align: left;
+  white-space: nowrap;
 }
 
 .analysis-markdown th {
