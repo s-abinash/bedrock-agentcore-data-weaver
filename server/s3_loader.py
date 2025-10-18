@@ -16,7 +16,7 @@ def get_file_extension(key: str) -> str:
 
 def load_from_s3(s3_url: str, region_name: str = None) -> Dict[str, pd.DataFrame]:
     if region_name is None:
-        region_name = os.environ.get("AWS_REGION", "us-east-1")
+        region_name = os.environ.get("AWS_REGION") or "us-west-2"
 
     s3_client = boto3.client('s3', region_name=region_name)
 

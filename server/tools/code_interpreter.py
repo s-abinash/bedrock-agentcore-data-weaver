@@ -1,79 +1,63 @@
 import json
-import os
-from typing import Dict, Any, Optional
 from langchain_core.tools import tool
-from bedrock_agentcore.tools.code_interpreter_client import CodeInterpreter
 
 
-class CodeInterpreterManager:
-    def __init__(
-        self,
-        region: Optional[str] = None,
-        session_timeout_seconds: int = 1200,
-        tool_id: Optional[str] = None
-    ):
-        self.region = region or os.environ.get("AWS_REGION", "us-west-2")
-        self.session_timeout_seconds = session_timeout_seconds
-        self.tool_id = tool_id or os.environ.get("CODE_INTERPRETER_TOOL_ID")
-        self.code_client = None
+def create_code_interpreter_tools(dp_client, interpreter_id, session_id):
+    """Create tools with dp_client, interpreter_id, and session_id in closure"""
 
-    def start_session(self):
-        if not self.code_client:
-            if self.tool_id:
-                self.code_client = CodeInterpreter(self.region, code_interpreter_id=self.tool_id)
-            else:
-                self.code_client = CodeInterpreter(self.region)
-            self.code_client.start(session_timeout_seconds=self.session_timeout_seconds)
+    @tool
+    def execute_python(code: str, description: str = "") -> str:
+        """Execute Python code in the Amazon Bedrock AgentCore code interpreter sandbox.
 
-    def stop_session(self):
-        if self.code_client:
-            self.code_client.stop()
-            self.code_client = None
+        This tool runs Python code in an isolated sandbox environment that maintains state
+        between executions. Data files have been pre-loaded into the sandbox and can be
+        accessed directly by filename.
 
-    def invoke_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        if not self.code_client:
-            raise RuntimeError("Code interpreter session not started")
+        Args:
+            code: The Python code to execute
+            description: Optional description of what the code does
 
-        response = self.code_client.invoke(tool_name, arguments)
+        Returns:
+            str: JSON formatted result containing the execution output
+        """
+        if description:
+            code = f"# {description}\n{code}"
+
+        response = dp_client.invoke_code_interpreter(
+            codeInterpreterIdentifier=interpreter_id,
+            sessionId=session_id,
+            name="executeCode",
+            arguments={
+                "code": code,
+                "language": "python",
+                "clearContext": False
+            }
+        )
+
         for event in response["stream"]:
             return json.dumps(event["result"])
 
-    def write_files(self, files_to_create: list) -> str:
-        return self.invoke_tool("writeFiles", {"content": files_to_create})
+    @tool
+    def execute_command(command: str) -> str:
+        """Execute shell commands in the Amazon Bedrock AgentCore code interpreter sandbox.
 
-    def list_files(self, path: str = "") -> str:
-        return self.invoke_tool("listFiles", {"path": path})
+        This tool runs shell commands in the sandbox environment. Useful for operations like
+        installing packages, managing files, or uploading files to S3.
 
+        Args:
+            command: The shell command to execute
 
-code_interpreter_manager = CodeInterpreterManager()
+        Returns:
+            str: JSON formatted result containing the command execution output
+        """
+        response = dp_client.invoke_code_interpreter(
+            codeInterpreterIdentifier=interpreter_id,
+            sessionId=session_id,
+            name="executeCommand",
+            arguments={"command": command}
+        )
 
+        for event in response["stream"]:
+            return json.dumps(event["result"])
 
-@tool
-def execute_python(code: str, description: str = "") -> str:
-    """Execute Python code in the Amazon Bedrock AgentCore code interpreter sandbox.
-
-    This tool runs Python code in an isolated sandbox environment that maintains state
-    between executions. Data files have been pre-loaded into the sandbox and can be
-    accessed directly by filename.
-
-    Args:
-        code: The Python code to execute
-        description: Optional description of what the code does
-
-    Returns:
-        str: JSON formatted result containing the execution output
-    """
-    if description:
-        code = f"# {description}\n{code}"
-
-    if not code_interpreter_manager.code_client:
-        raise RuntimeError("Code interpreter session not started. Call start_session() first.")
-
-    response = code_interpreter_manager.code_client.invoke("executeCode", {
-        "code": code,
-        "language": "python",
-        "clearContext": False
-    })
-
-    for event in response["stream"]:
-        return json.dumps(event["result"])
+    return execute_python, execute_command

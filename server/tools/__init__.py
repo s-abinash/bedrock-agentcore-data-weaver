@@ -1,9 +1,7 @@
 from .upload_image import move_image_to_static_server
-from .code_interpreter import execute_python, code_interpreter_manager, CodeInterpreterManager
+from .code_interpreter import create_code_interpreter_tools
 
 __all__ = [
     "move_image_to_static_server",
-    "execute_python",
-    "code_interpreter_manager",
-    "CodeInterpreterManager"
+    "create_code_interpreter_tools"
 ]

@@ -13,14 +13,14 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
-from langchain_aws import ChatBedrockConverse
+# from langchain_aws import ChatBedrockConverse  # Bedrock Claude model (disabled)
 
 try:
     from .data_analyzer_agentcore import analyze_data_with_agentcore
     from .s3_loader import load_multiple_from_s3
 except ImportError:
-    from data_analyzer_agentcore import analyze_data_with_agentcore
-    from s3_loader import load_multiple_from_s3
+    from server.data_analyzer_agentcore import analyze_data_with_agentcore
+    from server.s3_loader import load_multiple_from_s3
 
 load_dotenv()
 
@@ -35,6 +35,8 @@ logging.basicConfig(
 logger = logging.getLogger("pandas-agent-core")
 uvicorn_logger = logging.getLogger("uvicorn.error")
 
+SESSION_CACHE = {}
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -47,6 +49,7 @@ app.add_middleware(
 class InvocationRequest(BaseModel):
     s3_urls: Dict[str, str]
     prompt: str
+    runtime_session_id: str | None = None
     traceId: str | None = None
     baggage: str | None = None
     tracestate: str | None = None
@@ -61,32 +64,22 @@ def get_llm():
 
 
 def get_bedrock_llm():
-    region = os.environ.get("AWS_REGION", "us-west-2")
-    return ChatBedrockConverse(
-        model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-        region_name=region
+    # Use OpenAI GPT-4.1 for both /invocations and /chat. Previous Bedrock model kept commented for reference.
+    return ChatOpenAI(
+        model="gpt-4.1",
+        temperature=0,
+        api_key=os.environ.get("OPENAI_API_KEY")
     )
 
 
 def _get_bedrock_agent_runtime_client():
-    region = os.environ.get("AWS_REGION", "us-west-2")
-    client_kwargs: Dict[str, str] = {"region_name": region}
-
-    access_key = os.environ.get("AWS_ACCESS_KEY_ID")
-    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
-    session_token = os.environ.get("AWS_SESSION_TOKEN")
-
-    if access_key and secret_key:
-        client_kwargs["aws_access_key_id"] = access_key
-        client_kwargs["aws_secret_access_key"] = secret_key
-        if session_token:
-            client_kwargs["aws_session_token"] = session_token
+    region = os.environ.get("AWS_REGION") or "us-west-2"
 
     logger.debug(
         "Creating Bedrock Agent Runtime client",
-        extra={"region": region, "has_explicit_creds": bool(access_key and secret_key)},
+        extra={"region": region},
     )
-    return boto3.client("bedrock-agentcore", **client_kwargs)
+    return boto3.client("bedrock-agentcore", region_name=region)
 
 
 def _get_s3_bucket() -> str:
@@ -100,20 +93,10 @@ def _get_s3_bucket() -> str:
 
 
 def _get_s3_client():
-    region = os.environ.get("AWS_REGION", "us-east-1")
+    region = os.environ.get("AWS_REGION") or "us-west-2"
     client_kwargs: Dict[str, str] = {"region_name": region}
 
-    access_key = os.environ.get("AWS_ACCESS_KEY_ID")
-    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
-    session_token = os.environ.get("AWS_SESSION_TOKEN")
-
-    if access_key and secret_key:
-        client_kwargs["aws_access_key_id"] = access_key
-        client_kwargs["aws_secret_access_key"] = secret_key
-        if session_token:
-            client_kwargs["aws_session_token"] = session_token
-
-    logger.debug("Creating boto3 S3 client", extra={"region": region, "has_explicit_creds": bool(access_key and secret_key)})
+    logger.debug("Creating boto3 S3 client", extra={"region": region})
     return boto3.client("s3", **client_kwargs)
 
 
@@ -148,12 +131,48 @@ def _extract_trace_payload_overrides(payload: InvocationRequest) -> Dict[str, st
         trace_payload["traceparent"] = payload.traceparent
     return trace_payload
 
+
+def _get_chart_urls_from_s3(session_id: str, bucket: str) -> List[str]:
+    try:
+        s3_client = _get_s3_client()
+        prefix = f"charts/{session_id}/"
+
+        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+
+        if 'Contents' not in response:
+            return []
+
+        chart_urls = []
+        for obj in response['Contents']:
+            key = obj['Key']
+            if key.lower().endswith(('.png', '.jpg', '.jpeg', '.svg', '.pdf')):
+                presigned_url = s3_client.generate_presigned_url(
+                    'get_object',
+                    Params={'Bucket': bucket, 'Key': key},
+                    ExpiresIn=3600
+                )
+                chart_urls.append(presigned_url)
+
+        return chart_urls
+    except (BotoCoreError, ClientError) as e:
+        logger.warning(f"Failed to retrieve chart URLs from S3: {e}")
+        return []
+
 @app.get('/ping')
 def ping():
     return {
         "status": "Healthy",
         "time_of_last_update": int(time.time())
     }
+
+
+@app.post('/cleanup-session')
+def cleanup_session(runtime_session_id: str):
+    if runtime_session_id in SESSION_CACHE:
+        session_id = SESSION_CACHE[runtime_session_id]
+        del SESSION_CACHE[runtime_session_id]
+        return {"message": f"Session {session_id} removed from cache for runtime session {runtime_session_id}"}
+    return {"message": f"No session found for runtime session {runtime_session_id}"}
 
 
 @app.post("/upload")
@@ -277,7 +296,11 @@ def invocations(request: Request, payload: InvocationRequest):
 
         llm = get_bedrock_llm()
 
-        result = analyze_data_with_agentcore(df_dict, llm, prompt)
+        bucket = _get_s3_bucket()
+
+        runtime_session_id = payload.runtime_session_id or request.headers.get("x-amzn-bedrock-agentcore-runtime-session-id")
+
+        result = analyze_data_with_agentcore(df_dict, llm, prompt, bucket_name=bucket, runtime_session_id=runtime_session_id)
 
         logger.info(
             "Invocation completed successfully",
@@ -342,6 +365,7 @@ def chat(request: Request, payload: InvocationRequest):
             },
         )
 
+        logger.debug("Preparing Bedrock Agent Runtime client")
         client = _get_bedrock_agent_runtime_client()
 
         agent_runtime_arn = os.environ.get("BEDROCK_AGENT_RUNTIME_ARN")
@@ -371,6 +395,16 @@ def chat(request: Request, payload: InvocationRequest):
             }
         )
 
+        logger.info(
+            "Invoking Bedrock Agent Runtime",
+            extra={
+                "runtime_session_id": runtime_session_id,
+                "dataframes": list(s3_urls.keys()),
+                "agent_runtime_arn": agent_runtime_arn,
+                "qualifier": qualifier,
+            },
+        )
+
         try:
             response = client.invoke_agent_runtime(
                 agentRuntimeArn=agent_runtime_arn,
@@ -391,6 +425,7 @@ def chat(request: Request, payload: InvocationRequest):
                 detail=f"Failed to invoke Bedrock Agent Runtime: {exc}",
             ) from exc
 
+        logger.debug("Bedrock Agent Runtime invocation returned, reading stream")
         response_stream = response.get("response")
         if response_stream is None:
             logger.error("Bedrock Agent Runtime response missing 'response' stream")
@@ -400,6 +435,10 @@ def chat(request: Request, payload: InvocationRequest):
             )
 
         raw_body = response_stream.read()
+        logger.debug(
+            "Raw payload received from Bedrock runtime",
+            extra={"runtime_session_id": runtime_session_id, "payload_length": len(raw_body) if hasattr(raw_body, "__len__") else None},
+        )
         body_text = raw_body.decode("utf-8") if isinstance(raw_body, (bytes, bytearray)) else str(raw_body)
 
         try:
@@ -425,12 +464,23 @@ def chat(request: Request, payload: InvocationRequest):
             output = response_data
             response_keys = []
 
+        bucket = os.environ.get("S3_BUCKET_NAME")
+        logger.info("Session ID: " + runtime_session_id)
+        chart_urls: List[str] = []
+        if bucket:
+            logger.debug(
+                "Scanning S3 for generated charts",
+                extra={"bucket": bucket, "runtime_session_id": runtime_session_id},
+            )
+            chart_urls = _get_chart_urls_from_s3(runtime_session_id, bucket)
+        logger.info(chart_urls)
         logger.info(
             "Chat invocation completed successfully",
             extra={
                 "runtime_session_id": runtime_session_id,
                 "dataframes_loaded": list(s3_urls.keys()),
                 "response_keys": response_keys,
+                "chart_count": len(chart_urls),
             },
         )
 
@@ -438,6 +488,7 @@ def chat(request: Request, payload: InvocationRequest):
             "output": output,
             "intermediate_steps": intermediate_steps,
             "dataframes_loaded": list(s3_urls.keys()),
+            "charts": chart_urls,
             "trace": {
                 "headers": trace_headers,
                 "payload": trace_payload,
@@ -460,4 +511,4 @@ def chat(request: Request, payload: InvocationRequest):
 
 if __name__ == '__main__':
     import uvicorn
-    uvicorn.run(app, host='0.0.0.0', port=8080)
+    uvicorn.run(app, host='0.0.0.0', port=8080, access_log=False)

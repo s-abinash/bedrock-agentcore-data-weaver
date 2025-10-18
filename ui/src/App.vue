@@ -116,67 +116,98 @@
       <p class="caption">The backend will use Amazon Bedrock AgentCore runtime for analysis.</p>
     </section>
 
-    <section class="card">
-      <h2>Observability</h2>
-      <p class="hint">
-        Optional tracing context. Leave blank for defaults.
-      </p>
-      <div class="grid">
-        <label class="field">
-          <span>Session ID</span>
-          <input
-            type="text"
-            placeholder="X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
-            v-model="traceFields.sessionId"
-          />
-        </label>
-        <label class="field">
-          <span>MCP Session ID</span>
-          <input
-            type="text"
-            placeholder="mcp-session-id"
-            v-model="traceFields.mcpSessionId"
-          />
-        </label>
-        <label class="field">
-          <span>Traceparent</span>
-          <input
-            type="text"
-            placeholder="00-4bf92f...-00f067aa0ba902b7-01"
-            v-model="traceFields.traceparent"
-          />
-        </label>
-        <label class="field">
-          <span>Tracestate</span>
-          <input
-            type="text"
-            placeholder="congo=t61rcWkgMzE,rojo=00f067aa0ba902b7"
-            v-model="traceFields.tracestate"
-          />
-        </label>
-        <label class="field">
-          <span>Baggage</span>
-          <input
-            type="text"
-            placeholder="userId=alice,serverRegion=us-east-1"
-            v-model="traceFields.baggage"
-          />
-        </label>
-        <label class="field">
-          <span>X-Ray Trace ID</span>
-          <input
-            type="text"
-            placeholder="Root=1-5759e988-..."
-            v-model="traceFields.traceId"
-          />
-        </label>
-      </div>
-    </section>
+<!--    <section class="card">-->
+<!--      <h2>Observability</h2>-->
+<!--      <p class="hint">-->
+<!--        Optional tracing context. Leave blank for defaults.-->
+<!--      </p>-->
+<!--      <div class="grid">-->
+<!--        <label class="field">-->
+<!--          <span>Session ID</span>-->
+<!--          <input-->
+<!--            type="text"-->
+<!--            placeholder="X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"-->
+<!--            v-model="traceFields.sessionId"-->
+<!--          />-->
+<!--        </label>-->
+<!--        <label class="field">-->
+<!--          <span>MCP Session ID</span>-->
+<!--          <input-->
+<!--            type="text"-->
+<!--            placeholder="mcp-session-id"-->
+<!--            v-model="traceFields.mcpSessionId"-->
+<!--          />-->
+<!--        </label>-->
+<!--        <label class="field">-->
+<!--          <span>Traceparent</span>-->
+<!--          <input-->
+<!--            type="text"-->
+<!--            placeholder="00-4bf92f...-00f067aa0ba902b7-01"-->
+<!--            v-model="traceFields.traceparent"-->
+<!--          />-->
+<!--        </label>-->
+<!--        <label class="field">-->
+<!--          <span>Tracestate</span>-->
+<!--          <input-->
+<!--            type="text"-->
+<!--            placeholder="congo=t61rcWkgMzE,rojo=00f067aa0ba902b7"-->
+<!--            v-model="traceFields.tracestate"-->
+<!--          />-->
+<!--        </label>-->
+<!--        <label class="field">-->
+<!--          <span>Baggage</span>-->
+<!--          <input-->
+<!--            type="text"-->
+<!--            placeholder="userId=alice,serverRegion=us-east-1"-->
+<!--            v-model="traceFields.baggage"-->
+<!--          />-->
+<!--        </label>-->
+<!--        <label class="field">-->
+<!--          <span>X-Ray Trace ID</span>-->
+<!--          <input-->
+<!--            type="text"-->
+<!--            placeholder="Root=1-5759e988-..."-->
+<!--            v-model="traceFields.traceId"-->
+<!--          />-->
+<!--        </label>-->
+<!--      </div>-->
+<!--    </section>-->
 
     <section v-if="analysisResult" class="card">
       <h2>Results</h2>
       <div class="analysis-output">
-        <pre>{{ analysisResult.output || "No output returned." }}</pre>
+        <div
+          v-if="renderedOutput"
+          class="analysis-markdown"
+          v-html="renderedOutput"
+        ></div>
+        <p v-else class="analysis-placeholder">No output returned.</p>
+      </div>
+
+      <div v-if="resolvedCharts.length" class="charts-section">
+        <h3>Charts</h3>
+        <div class="chart-grid">
+          <article
+            v-for="(chartUrl, index) in resolvedCharts"
+            :key="`${chartUrl}-${index}`"
+            class="chart-card"
+          >
+            <img
+              :src="chartUrl"
+              :alt="`Generated chart ${index + 1}`"
+              class="chart-image"
+              loading="lazy"
+            />
+            <a
+              :href="chartUrl"
+              target="_blank"
+              rel="noopener"
+              class="chart-link"
+            >
+              Open chart {{ index + 1 }}
+            </a>
+          </article>
+        </div>
       </div>
 
       <details v-if="structuredSteps.length" class="steps-accordion">
@@ -222,6 +253,8 @@
 
 <script setup>
 import { computed, ref } from "vue";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 import { apiClient } from "./apiClient.js";
 
 const selectedFiles = ref([]);
@@ -437,6 +470,43 @@ const reset = () => {
   errorMessage.value = "";
   resetTraceFields();
 };
+
+const resolvedCharts = computed(() => {
+  const charts = analysisResult.value?.charts;
+  if (Array.isArray(charts)) {
+    return charts.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim());
+  }
+  if (typeof charts === "string" && charts.trim()) {
+    return [charts.trim()];
+  }
+  return [];
+});
+
+const renderedOutput = computed(() => {
+  const output = analysisResult.value?.output;
+  if (!output) {
+    return "";
+  }
+
+  const text =
+    typeof output === "string"
+      ? output
+      : (() => {
+          try {
+            return JSON.stringify(output, null, 2);
+          } catch {
+            return String(output);
+          }
+        })();
+
+  const rawHtml = marked.parse(text, {
+    mangle: false,
+    headerIds: false,
+    breaks: true,
+  });
+
+  return DOMPurify.sanitize(rawHtml);
+});
 
 const structuredSteps = computed(() => {
   const rawSteps = analysisResult.value?.intermediate_steps;
@@ -801,17 +871,154 @@ button:disabled {
 }
 
 .analysis-output {
-  background-color: #0f172a;
-  color: #e0f2fe;
+  background-color: #f8fafc;
   border-radius: 14px;
-  padding: 1.25rem;
-  font-size: 0.95rem;
+  border: 1px solid #e2e8f0;
+  padding: 1.5rem;
+  font-size: 0.97rem;
+  color: #0f172a;
+  overflow-x: auto;
+  box-shadow: 0 16px 30px -28px rgba(15, 23, 42, 0.6);
+}
+
+.analysis-markdown {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  line-height: 1.6;
+}
+
+.analysis-markdown h1,
+.analysis-markdown h2,
+.analysis-markdown h3,
+.analysis-markdown h4,
+.analysis-markdown h5,
+.analysis-markdown h6 {
+  margin: 0;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.analysis-markdown h2 {
+  font-size: 1.35rem;
+}
+
+.analysis-markdown h3 {
+  font-size: 1.1rem;
+}
+
+.analysis-markdown p {
+  margin: 0;
+}
+
+.analysis-markdown ul,
+.analysis-markdown ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.analysis-markdown li {
+  margin: 0;
+}
+
+.analysis-markdown code {
+  background-color: #e2e8f0;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+  font-size: 0.92rem;
+}
+
+.analysis-markdown pre {
+  margin: 0;
+  background-color: #0f172a;
+  color: #e2e8f0;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
   overflow-x: auto;
 }
 
-.analysis-output pre {
+.analysis-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.95rem;
+}
+
+.analysis-markdown th,
+.analysis-markdown td {
+  border: 1px solid #dbe4ff;
+  padding: 0.6rem;
+  text-align: left;
+}
+
+.analysis-markdown th {
+  background-color: #eef2ff;
+  font-weight: 600;
+}
+
+.analysis-placeholder {
   margin: 0;
-  white-space: pre-wrap;
+  color: #64748b;
+  font-style: italic;
+}
+
+.charts-section {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.charts-section h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.chart-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.chart-card {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: center;
+  box-shadow: 0 10px 24px -22px rgba(15, 23, 42, 0.45);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.chart-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px -20px rgba(37, 99, 235, 0.35);
+}
+
+.chart-image {
+  width: 100%;
+  height: auto;
+  max-height: 260px;
+  border-radius: 10px;
+  object-fit: contain;
+  background-color: #fff;
+}
+
+.chart-link {
+  font-weight: 600;
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.chart-link:hover {
+  text-decoration: underline;
 }
 
 .steps-accordion {
