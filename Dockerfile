@@ -16,4 +16,6 @@ RUN mkdir -p /app/server/static
 
 EXPOSE 8080
 
-CMD ["opentelemetry-instrument", "python", "-m", "server.app"]
+ENV LOG_LEVEL=WARNING
+
+CMD ["opentelemetry-instrument", "uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "warning", "--no-access-log"]

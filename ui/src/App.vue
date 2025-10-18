@@ -340,6 +340,30 @@ const resetTraceFields = () => {
   };
 };
 
+const generateSessionId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, "");
+  }
+
+  const randomSegment = () => Math.random().toString(36).slice(2);
+  let candidate = "";
+  while (candidate.length <= 32) {
+    candidate += randomSegment();
+  }
+  return candidate.slice(0, 64);
+};
+
+const ensureRuntimeSessionId = () => {
+  const existing = (traceFields.value.sessionId || "").trim();
+  if (existing.length > 32) {
+    return existing;
+  }
+
+  const sessionId = generateSessionId();
+  traceFields.value.sessionId = sessionId;
+  return sessionId;
+};
+
 const observabilityHeaders = computed(() => {
   const headers = {};
   if (traceFields.value.sessionId) {
@@ -376,9 +400,11 @@ const runAnalysis = async () => {
     return acc;
   }, {});
 
+  const runtimeSessionId = ensureRuntimeSessionId();
+
   try {
     const response = await apiClient.post(
-      "/invocations",
+      "/chat",
       {
         s3_urls: s3UrlsPayload,
         prompt: prompt.value,
@@ -388,7 +414,10 @@ const runAnalysis = async () => {
         baggage: traceFields.value.baggage || undefined,
       },
       {
-        headers: observabilityHeaders.value,
+        headers: {
+          ...observabilityHeaders.value,
+          "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": runtimeSessionId,
+        },
       }
     );
     analysisResult.value = response.data;

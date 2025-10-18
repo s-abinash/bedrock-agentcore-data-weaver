@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import uuid
 import traceback
@@ -12,9 +13,14 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
+from langchain_aws import ChatBedrockConverse
 
-from .data_analyzer import analyze_data
-from .s3_loader import load_multiple_from_s3
+try:
+    from .data_analyzer_agentcore import analyze_data_with_agentcore
+    from .s3_loader import load_multiple_from_s3
+except ImportError:
+    from data_analyzer_agentcore import analyze_data_with_agentcore
+    from s3_loader import load_multiple_from_s3
 
 load_dotenv()
 
@@ -52,6 +58,35 @@ def get_llm():
         temperature=0,
         api_key=os.environ.get("OPENAI_API_KEY")
     )
+
+
+def get_bedrock_llm():
+    region = os.environ.get("AWS_REGION", "us-west-2")
+    return ChatBedrockConverse(
+        model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+        region_name=region
+    )
+
+
+def _get_bedrock_agent_runtime_client():
+    region = os.environ.get("AWS_REGION", "us-west-2")
+    client_kwargs: Dict[str, str] = {"region_name": region}
+
+    access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    session_token = os.environ.get("AWS_SESSION_TOKEN")
+
+    if access_key and secret_key:
+        client_kwargs["aws_access_key_id"] = access_key
+        client_kwargs["aws_secret_access_key"] = secret_key
+        if session_token:
+            client_kwargs["aws_session_token"] = session_token
+
+    logger.debug(
+        "Creating Bedrock Agent Runtime client",
+        extra={"region": region, "has_explicit_creds": bool(access_key and secret_key)},
+    )
+    return boto3.client("bedrock-agentcore", **client_kwargs)
 
 
 def _get_s3_bucket() -> str:
@@ -240,9 +275,9 @@ def invocations(request: Request, payload: InvocationRequest):
                 detail="No dataframes loaded from S3"
             )
 
-        llm = get_llm()
+        llm = get_bedrock_llm()
 
-        result = analyze_data(df_dict, llm, prompt)
+        result = analyze_data_with_agentcore(df_dict, llm, prompt)
 
         logger.info(
             "Invocation completed successfully",
@@ -256,10 +291,10 @@ def invocations(request: Request, payload: InvocationRequest):
             "output": result.get('output', ''),
             "intermediate_steps": result.get('intermediate_steps', []),
             "dataframes_loaded": list(df_dict.keys()),
-            "trace": {
-                "headers": _extract_trace_headers(request.headers),
-                "payload": _extract_trace_payload_overrides(payload),
-            }
+                "trace": {
+                    "headers": _extract_trace_headers(request.headers),
+                    "payload": _extract_trace_payload_overrides(payload),
+                }
         }
 
     except HTTPException:
@@ -274,6 +309,154 @@ def invocations(request: Request, payload: InvocationRequest):
                 "traceback": traceback.format_exc()
             }
         )
+
+
+@app.post("/chat")
+def chat(request: Request, payload: InvocationRequest):
+    try:
+        s3_urls = payload.s3_urls
+        prompt = payload.prompt
+
+        if not s3_urls:
+            raise HTTPException(
+                status_code=400,
+                detail="No S3 URLs provided. Expected 's3_urls' field with dict of name->S3 URL"
+            )
+
+        if not prompt:
+            raise HTTPException(
+                status_code=400,
+                detail="No prompt provided"
+            )
+
+        trace_headers = _extract_trace_headers(request.headers)
+        trace_payload = _extract_trace_payload_overrides(payload)
+
+        logger.info(
+            "Chat request received",
+            extra={
+                "prompt_preview": prompt[:120],
+                "dataframe_count": len(s3_urls),
+                "trace_headers": trace_headers,
+                "trace_payload": trace_payload,
+            },
+        )
+
+        client = _get_bedrock_agent_runtime_client()
+
+        agent_runtime_arn = os.environ.get("BEDROCK_AGENT_RUNTIME_ARN")
+        if not agent_runtime_arn:
+            raise HTTPException(
+                status_code=500,
+                detail="BEDROCK_AGENT_RUNTIME_ARN environment variable must be set.",
+            )
+
+        runtime_session_id = next(
+            (
+                value
+                for key, value in trace_headers.items()
+                if key.lower() == "x-amzn-bedrock-agentcore-runtime-session-id"
+            ),
+            None,
+        )
+        if not runtime_session_id:
+            runtime_session_id = os.environ.get("BEDROCK_AGENT_RUNTIME_SESSION_ID") or uuid.uuid4().hex
+
+        qualifier = os.environ.get("BEDROCK_AGENT_RUNTIME_QUALIFIER", "DEFAULT")
+
+        runtime_payload = json.dumps(
+            {
+                "s3_urls": s3_urls,
+                "prompt": prompt,
+            }
+        )
+
+        try:
+            response = client.invoke_agent_runtime(
+                agentRuntimeArn=agent_runtime_arn,
+                runtimeSessionId=runtime_session_id,
+                payload=runtime_payload,
+                qualifier=qualifier,
+            )
+        except NoCredentialsError as exc:
+            logger.exception("AWS credentials not found while invoking Bedrock Agent Runtime")
+            raise HTTPException(
+                status_code=500,
+                detail="AWS credentials not found. Please configure AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.",
+            ) from exc
+        except (BotoCoreError, ClientError) as exc:
+            logger.exception("Failed to invoke Bedrock Agent Runtime")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to invoke Bedrock Agent Runtime: {exc}",
+            ) from exc
+
+        response_stream = response.get("response")
+        if response_stream is None:
+            logger.error("Bedrock Agent Runtime response missing 'response' stream")
+            raise HTTPException(
+                status_code=500,
+                detail="Bedrock Agent Runtime response malformed: missing response stream",
+            )
+
+        raw_body = response_stream.read()
+        body_text = raw_body.decode("utf-8") if isinstance(raw_body, (bytes, bytearray)) else str(raw_body)
+
+        try:
+            response_data = json.loads(body_text)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse Bedrock Agent Runtime response as JSON; returning raw text")
+            response_data = {"message": body_text}
+
+        if isinstance(response_data, dict):
+            intermediate_steps = (
+                response_data.get("intermediate_steps")
+                or response_data.get("intermediateSteps")
+                or []
+            )
+            output = (
+                response_data.get("output")
+                or response_data.get("completion")
+                or response_data
+            )
+            response_keys = list(response_data.keys())
+        else:
+            intermediate_steps = []
+            output = response_data
+            response_keys = []
+
+        logger.info(
+            "Chat invocation completed successfully",
+            extra={
+                "runtime_session_id": runtime_session_id,
+                "dataframes_loaded": list(s3_urls.keys()),
+                "response_keys": response_keys,
+            },
+        )
+
+        return {
+            "output": output,
+            "intermediate_steps": intermediate_steps,
+            "dataframes_loaded": list(s3_urls.keys()),
+            "trace": {
+                "headers": trace_headers,
+                "payload": trace_payload,
+                "runtime_session_id": runtime_session_id,
+            },
+        }
+
+    except HTTPException:
+        logger.exception("HTTPException raised while handling chat request")
+        raise
+    except Exception as exc:
+        logger.exception("Unhandled exception during chat invocation")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            },
+        ) from exc
 
 if __name__ == '__main__':
     import uvicorn
