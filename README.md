@@ -12,8 +12,8 @@ DataWeaver is a FastAPI service and Vue UI that sit between Amazon Bedrock Agent
 
 
 ![Header](./screenshots/Header.png)
-![Ask a Question](./screenshots/Ask a Question.png)
-![Results](./screenshots/Agent Results.jpeg)
+![Ask a Question](screenshots/AskQuestion.png)
+![Results](screenshots/AgentResults.jpeg)
 
 ## Architecture
 
