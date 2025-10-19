@@ -2,7 +2,7 @@ import json
 import uuid
 import requests
 
-BASE_URL = "http://localhost:8080"
+BASE_URL = "https://bedrock-agent-api.create.presidio.cloud"
 
 
 def test_ping():
@@ -47,7 +47,7 @@ def test_chat():
         "s3_urls": {
             "customers": "s3://data-agent-bedrock-ac/customers-1000.csv"
         },
-        "prompt": "Generate a bar chart showing the number of customers per country and summarize the most significant insight.",
+        "prompt": "What is the major country our customer base is from?",
     }
 
     headers = {

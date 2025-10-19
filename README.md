@@ -2,8 +2,6 @@
 
 DataWeaver is a FastAPI service and Vue UI that sit between Amazon Bedrock AgentCore and business users. Upload tabular data to S3, ask a question, and the service coordinates Bedrock’s code-interpreter tools to deliver Markdown narratives and shareable charts.
 
-![Architecture](architecture.jpg)
-
 ## Key Features
 
 - **Single data ingress** – `/upload` streams files to S3 and returns keyed URIs for analysis sessions.
@@ -12,12 +10,21 @@ DataWeaver is a FastAPI service and Vue UI that sit between Amazon Bedrock Agent
 - **Polished responses** – results return as sanitized Markdown and chart URLs; the Vue front end renders headings, tables, and gallery cards.
 - **Trace-friendly** – headers (`traceparent`, `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, etc.) and payload overrides are preserved for OTEL.
 
+
+![Header](./screenshots/Header.png)
+![Ask a Question](./screenshots/Ask a Question.png)
+![Results](./screenshots/Agent Results.jpeg)
+
+## Architecture
+
+![Architecture](architecture.jpg)
+
 ## Repository Layout
 
 - `server/` – FastAPI backend, Bedrock orchestration utilities, S3 loader, Streamlit helper.
 - `ui/` – Vue 3 + Vite single page app (axios client, Markdown renderer, chart grid).
 - `Dockerfile` – production image suitable for ECS or Bedrock Agent Runtime.
-- `architecture.jpg` – system diagram included above.
+See [SETUP.md](SETUP.md) for detailed installation and deployment steps.
 
 ## Prerequisites
 
@@ -134,8 +141,9 @@ docker build -t agentcore-dataweaver .
 ## Available Scripts
 
 - `uv run pytest` – backend smoke tests (see `server/tests`).
+- `npm run dev` – UI development server.
 - `npm run build` – production UI bundle.
-- `npm run lint` – add your lint command of choice.
+- `npm run lint` – hook in your preferred linter.
 
 ## License
 
