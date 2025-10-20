@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
-# from langchain_aws import ChatBedrockConverse  # Bedrock Claude model (disabled)
+from langchain_aws import ChatBedrockConverse
 
 try:
     from .data_analyzer_agentcore import analyze_data_with_agentcore
@@ -55,21 +55,27 @@ class InvocationRequest(BaseModel):
     tracestate: str | None = None
     traceparent: str | None = None
 
-def get_llm():
-    return ChatOpenAI(
-        model="gpt-4.1",
+def get_llm(provider: str | None = None):
+    selected = (provider or os.environ.get("LLM_PROVIDER") or "aws").lower()
+
+    if selected == "openai":
+        return ChatOpenAI(
+            model="gpt-4.1",
+            temperature=0,
+            api_key=os.environ.get("OPENAI_API_KEY")
+        )
+
+    model_id = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
+    region = os.environ.get("AWS_REGION") or "us-west-2"
+    return ChatBedrockConverse(
+        model_id=model_id,
+        region_name=region,
         temperature=0,
-        api_key=os.environ.get("OPENAI_API_KEY")
     )
 
 
 def get_bedrock_llm():
-    # Use OpenAI GPT-4.1 for both /invocations and /chat. Previous Bedrock model kept commented for reference.
-    return ChatOpenAI(
-        model="gpt-4.1",
-        temperature=0,
-        api_key=os.environ.get("OPENAI_API_KEY")
-    )
+    return get_llm("aws")
 
 
 def _get_bedrock_agent_runtime_client():
